@@ -1,8 +1,0 @@
-{
-  "host": "mail.ub.cz",
-  "port": 587,
-  "security": "starttls",
-  "from": "kamil.valek@ub.cz",
-  "username": "",
-  "password": ""
-}
