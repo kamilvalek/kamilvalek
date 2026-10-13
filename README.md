@@ -1,10 +1,10 @@
 # Propustky → Tabulky Google
 
-Formulář uloží e-mail zaměstnance, datum a důvod odchodu do tabulky na vašem
+Formulář uloží e-mail zaměstnance, datum, čas Od–Do a důvod odchodu do tabulky na vašem
 Google Disku. Každá žádost má čas podání (Europe/Prague), stav **Nová** a vlastní ID.
 Potvrzení se zobrazí až po úspěšném zápisu. Správce může stav upravovat přímo v tabulce.
-Tato verze nahrazuje původní e-mailovou aplikaci; neodesílá e-maily ani automaticky
-neschvaluje žádosti po 10 minutách. Běží přímo v Googlu, nepotřebuje Python,
+Po každém novém podání odešle notifikaci na **kami.valek@gmail.com** pomocí Google MailApp.
+Žádosti automaticky neschvaluje. Běží přímo v Googlu, nepotřebuje Python,
 SMTP server ani zapnutý pracovní počítač.
 
 ## První nastavení krok za krokem
@@ -36,12 +36,12 @@ SMTP server ani zapnutý pracovní počítač.
 
 1. V horním seznamu funkcí vyberte **setup** a klikněte na **Spustit**.
 2. Google požádá o autorizaci. Vyberte svůj účet a povolte projektu přístup
-   k tabulkám. Povolujte pouze projekt, který jste právě vytvořili z těchto souborů.
+   k tabulkám, odesílání e-mailů a vytváření časových spouštěčů. Povolujte pouze projekt, který jste právě vytvořili z těchto souborů.
    Pokud firemní politika autorizaci blokuje, obraťte se na správce Google Workspace.
 3. Počkejte na dokončení bez chyby. V tabulce se objeví list **Propustky** s hlavičkou:
 
-   | Čas podání | E-mail | Datum odchodu | Důvod | Stav | ID žádosti |
-   | --- | --- | --- | --- | --- | --- |
+   | Čas podání | E-mail | Datum odchodu | Důvod | Stav | ID žádosti | Čas odchodu Od | Čas odchodu Do | Notifikace |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 4. Tabulka zůstává na vašem Google Disku. `setup` lze opakovat; nevymaže již uložené
    žádosti. Pokud máte list Propustky s jinou strukturou, přejmenujte ho, aby aplikace
@@ -67,16 +67,52 @@ SMTP server ani zapnutý pracovní počítač.
 ### 5. Ověřte skutečný zápis
 
 1. Otevřete získanou adresu `/exec` a případně se přihlaste do Google účtu.
-2. Zadejte svůj e-mail, dnešní nebo budoucí datum a důvod **Test aplikace**.
+2. Zadejte svůj e-mail, dnešní nebo budoucí datum, čas Od–Do (například 09:00–10:30) a důvod **Test aplikace**.
 3. Klikněte na **Uložit žádost**. Počkejte na potvrzení a číslo žádosti.
 4. Vraťte se do tabulky, otevřete list **Propustky** a ověřte nový řádek se všemi údaji.
-5. Vyzkoušejte formulář i z účtu zaměstnance, abyste ověřili přístupová práva.
-6. Testovací řádek můžete potom smazat.
+5. Zkontrolujte doručení oznámení do **kami.valek@gmail.com**, včetně nevyžádané pošty.
+6. Vyzkoušejte formulář i z účtu zaměstnance, abyste ověřili přístupová práva.
+7. Testovací řádek můžete potom smazat.
 
 Potvrzení **Žádost je uložena** znamená zápis do tabulky, nikoli schválení odchodu.
 Zaměstnanec nevidí ostatní žádosti. E-mail z formuláře je zadaná kontaktní adresa,
 nikoli ověřená identita přihlášeného uživatele. Schválení evidujte úpravou sloupce
 **Stav** například na **Schváleno** nebo **Zamítnuto**; tato úprava neodesílá upozornění.
+
+## Aktualizace existující verze na čas Od–Do a notifikace
+
+1. V původním Apps Script projektu nahraďte obsahy `Code.gs` a `Index.html` aktuálními soubory.
+2. Uložte a spusťte **setup**. Povolte nově požadované odesílání e-mailů a spouštěče.
+3. Funkce doplní tři sloupce za původních šest. Staré řádky i ruční stavy zachová;
+   u starých žádostí budou časy prázdné a neodešlou se zpětné notifikace.
+4. Vytvoří se jeden spouštěč `retryNotifications` každých přibližně 5 minut.
+   Opakované spuštění setup nevytváří další stejné spouštěče.
+5. Aktualizujte nasazení postupem níže. Nestačí pouze změnit soubory v editoru.
+6. Odešlete nový test a ověřte časové údaje i skutečné doručení e-mailu.
+
+## Notifikace a plánování
+
+Notifikaci odesílá Google účet vlastníka aplikace (nikoli původní SMTP server).
+Příjemce je `kami.valek@gmail.com`, nastavený v konstantě `NOTIFICATION_EMAIL` v Code.gs.
+Zpráva obsahuje datum, časy, e-mail zaměstnance, důvod, ID žádosti a odkaz na tabulku.
+Její příjemce musí mít právo tabulku otevřít; aplikace sama sdílení nemění.
+Google MailApp podléhá denním kvótám účtu a pravidlům organizace.
+
+Sloupec **Notifikace** obsahuje **Čeká** nebo **Odesláno: čas**. Odesláno znamená,
+že Google přijal požadavek na odeslání, ne potvrzení doručení do schránky.
+Při chybě zůstane žádost uložená a časový spouštěč zkusí odeslání znovu.
+Při vyčerpání denní kvóty čeká do její obnovy. Stejné úspěšné podání se při opakování
+běžně neoznamuje znovu. Vzácný pád mezi odesláním e-mailu a zápisem stavu může způsobit
+opakovanou notifikaci; MailApp neposkytuje záruku právě jednoho odeslání.
+
+Časy jsou povinné a vztahují se ke stejnému dni. Interval přes půlnoc zatím není
+podporován. Formulář zobrazuje délku plánované nepřítomnosti. Zobrazení pro mobil
+má větší ovládací prvky a písmo, jedno hlavní sloupcové rozložení a dvě časová pole
+vedle sebe. Apps Script nastavuje viewport i pro svůj mobilní obal.
+
+Další možná vylepšení: týdenní přehled nepřítomností, filtrování podle oddělení,
+upozornění na souběh více nepřítomností, nabídka stavů Schváleno/Zamítnuto a
+ověřená identita zaměstnance místo ručně zadávaného e-mailu.
 
 ## Aktualizace již nasazené aplikace
 
@@ -105,7 +141,8 @@ node --test test_google.cjs
 
 Testy používají simulované služby Google: ověřují obsah řádků, validaci, opakování
 bez duplicit, obnovu po ztraceném potvrzení, zámek souběžných zápisů a ochranu před
-vložením vzorce. Neověřují skutečnou autorizaci ani zápis do vašeho Disku. Ten je nutné
+vložením vzorce. Nové testy také ověřují notifikace, opakování při chybě pošty a zachování původních řádků.
+Neověřují skutečné doručení e-mailu, autorizaci ani zápis do vašeho Disku. Ten je nutné
 ověřit krokem 5 po nasazení pod vaším účtem.
 
 ## Původní data a soukromé soubory

@@ -27,7 +27,11 @@ function fixture() {
   };
   let created = false;
   const spreadsheet = {getId: () => 'test-sheet-id', getSheetByName: () => created ? sheet : null, insertSheet: () => { created = true; return sheet; }};
+  const mails = []; let mailFails = false; const triggers = [];
   const context = vm.createContext({
+    console: {warn() {}},
+    MailApp: {getRemainingDailyQuota: () => 100, sendEmail(mail) {if(mailFails) throw new Error('mail failure'); mails.push(mail);}},
+    ScriptApp: {getProjectTriggers: () => triggers, newTrigger: name => ({timeBased() {return this;}, everyMinutes() {return this;}, create() {triggers.push({getHandlerFunction: () => name});}})},
     SpreadsheetApp: {getActiveSpreadsheet: () => spreadsheet, openById(id) {assert.equal(id, 'test-sheet-id'); return spreadsheet;}, flush() {flushed++; if(failFlush) throw new Error('simulated Google failure');}},
     PropertiesService: {getScriptProperties: () => ({getProperty: key => properties[key], setProperty: (key, value) => properties[key] = value})},
     LockService: {getScriptLock: () => ({waitLock() {}, tryLock: () => true, releaseLock() {released++;}})},
@@ -35,8 +39,8 @@ function fixture() {
     HtmlService: {createHtmlOutputFromFile(name) {assert.equal(name, 'Index'); return {setTitle: title => title};}}
   });
   vm.runInContext(fs.readFileSync('Code.gs', 'utf8'), context);
-  const payload = {email:'employee@example.cz', date:'2026-10-12', reason:'Návštěva lékaře', id:'550e8400-e29b-41d4-a716-446655440000'};
-  return {context, rows, properties, payload, sheet, get released() {return released;}, get flushed() {return flushed;}, failFlush(value) {failFlush = value;}};
+  const payload = {email:'employee@example.cz', date:'2026-10-12', reason:'Návštěva lékaře', timeFrom:'09:00', timeTo:'10:30', id:'550e8400-e29b-41d4-a716-446655440000'};
+  return {context, mails, triggers, mailFails(value) {mailFails = value;}, rows, properties, payload, sheet, get released() {return released;}, get flushed() {return flushed;}, failFlush(value) {failFlush = value;}};
 }
 
 test('setup creates headers and binds the table, repeatedly without deleting rows', () => {
@@ -47,8 +51,8 @@ test('setup creates headers and binds the table, repeatedly without deleting row
 test('submits actual form fields to a new row and confirms only after flush', () => {
   const f = fixture(); f.context.setup(); const result = f.context.submitRequest(f.payload);
   assert.equal(result.saved, true); assert.equal(result.id, f.payload.id);
-  assert.deepEqual(f.rows[1], ['2026-10-11 15:00:00', f.payload.email, f.payload.date, f.payload.reason, 'Nová', f.payload.id]);
-  assert.equal(f.flushed, 2); assert.equal(f.released, 2);
+  assert.deepEqual(f.rows[1], ['2026-10-11 15:00:00', f.payload.email, f.payload.date, f.payload.reason, 'Nová', f.payload.id, '09:00', '10:30', 'Odesláno: 2026-10-11 15:00:00']);
+  assert.equal(f.flushed, 3); assert.equal(f.released, 2);
 });
 test('retry with same ID creates no duplicate', () => {
   const f = fixture(); f.context.setup(); f.context.submitRequest(f.payload); f.context.submitRequest(f.payload);
@@ -72,7 +76,7 @@ test('formula-like input is written as text', () => {
 });
 test('invalid data fails validation before writing', () => {
   const f = fixture(); f.context.setup();
-  for (const changes of [{email:'bad'}, {email:'a@b.cz\r\nX: y'}, {date:'2026-02-30'}, {date:'2026-10-10'}, {date:'20261012'}, {reason:'  '}, {reason:'x'.repeat(2001)}, {id:'invalid'}, {email:123}]) {
+  for (const changes of [{email:'bad'}, {email:'a@b.cz\r\nX: y'}, {date:'2026-02-30'}, {date:'2026-10-10'}, {date:'20261012'}, {reason:'  '}, {reason:'x'.repeat(2001)}, {id:'invalid'}, {email:123}, {timeFrom:'25:00'}, {timeTo:'09:00'}, {timeTo:'08:00'}]) {
     assert.throws(() => f.context.validate_({...f.payload, ...changes}));
   }
   assert.equal(f.rows.length, 1);
@@ -102,4 +106,30 @@ test('validation error allows editing without claiming a successful write', () =
   const result = f.context.submitRequest({...f.payload, reason:'  '});
   assert.equal(result.saved, false); assert.equal(result.retry, false);
   assert.match(result.error, /Důvod/); assert.equal(f.rows.length, 1);
+});
+
+test('notification has configured recipient, times and sheet link, only once on retry', () => {
+ const f=fixture(); f.context.setup(); f.context.submitRequest(f.payload); f.context.submitRequest(f.payload);
+ assert.equal(f.mails.length,1); assert.equal(f.mails[0].to,'kami.valek@gmail.com');
+ assert.match(f.mails[0].body,/09:00–10:30/); assert.match(f.mails[0].body,/docs.google.com/);
+});
+test('mail failure preserves saved request and retries by scheduled handler', () => {
+ const f=fixture(); f.context.setup(); f.mailFails(true);
+ assert.equal(f.context.submitRequest(f.payload).saved,true); assert.equal(f.rows[1][8],'Čeká');
+ f.mailFails(false); f.context.retryNotifications(); f.context.retryNotifications();
+ assert.equal(f.mails.length,1); assert.match(f.rows[1][8],/^Odesláno:/);
+});
+test('legacy header migration preserves original rows without sending historical notifications', () => {
+ const f=fixture(); f.context.setup(); f.rows[0]=f.rows[0].slice(0,6);
+ f.rows.push(['old','old@example.cz','2026-01-01','old reason','Schváleno','old-id']);
+ f.context.setup(); f.context.retryNotifications();
+ assert.equal(f.rows[0].length,9); assert.equal(f.rows[1][3],'old reason'); assert.equal(f.mails.length,0);
+ assert.equal(f.triggers.length,1);
+});
+
+test('quota exhaustion queues notification without losing the record', () => {
+ const f=fixture(); f.context.setup(); f.context.MailApp.getRemainingDailyQuota=()=>0;
+ assert.equal(f.context.submitRequest(f.payload).saved,true); assert.equal(f.mails.length,0);
+ assert.equal(f.rows[1][8],'Čeká'); f.context.MailApp.getRemainingDailyQuota=()=>1;
+ f.context.retryNotifications(); assert.equal(f.mails.length,1);
 });
