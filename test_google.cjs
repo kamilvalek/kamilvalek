@@ -5,7 +5,7 @@ const {test} = require('node:test');
 
 function fixture() {
   const rows = [];
-  const properties = {};
+  const properties = {}; const notes = {};
   let released = 0, flushed = 0, failFlush = false;
   const sheet = {
     getLastRow: () => rows.length,
@@ -19,6 +19,7 @@ function fixture() {
           return this;
         },
         getValues() { return Array.from({length:height}, (_, i) => (rows[row - 1 + i] || []).slice(column - 1, column - 1 + width)); },
+        setNote(value) {notes[row + ':' + column] = value; return this;},
         setNumberFormat(value) { assert.equal(value, '@'); return this; },
         setFontWeight() { return this; }, setBackground() { return this; }, setWrap() { return this; }
       };
@@ -29,7 +30,8 @@ function fixture() {
   const spreadsheet = {getId: () => 'test-sheet-id', getSheetByName: () => created ? sheet : null, insertSheet: () => { created = true; return sheet; }};
   const mails = []; let mailFails = false; const triggers = [];
   const context = vm.createContext({
-    console: {warn() {}},
+    console: {warn() {}, log() {}},
+    Session: {getActiveUser: () => ({getEmail: () => 'owner@example.cz'}), getEffectiveUser: () => ({getEmail: () => 'owner@example.cz'})},
     MailApp: {getRemainingDailyQuota: () => 100, sendEmail(mail) {if(mailFails) throw new Error('mail failure'); mails.push(mail);}},
     ScriptApp: {getProjectTriggers: () => triggers, newTrigger: name => ({timeBased() {return this;}, everyMinutes() {return this;}, create() {triggers.push({getHandlerFunction: () => name});}})},
     SpreadsheetApp: {getActiveSpreadsheet: () => spreadsheet, openById(id) {assert.equal(id, 'test-sheet-id'); return spreadsheet;}, flush() {flushed++; if(failFlush) throw new Error('simulated Google failure');}},
@@ -40,7 +42,7 @@ function fixture() {
   });
   vm.runInContext(fs.readFileSync('Code.gs', 'utf8'), context);
   const payload = {email:'employee@example.cz', date:'2026-10-12', reason:'Návštěva lékaře', timeFrom:'09:00', timeTo:'10:30', id:'550e8400-e29b-41d4-a716-446655440000'};
-  return {context, mails, triggers, mailFails(value) {mailFails = value;}, rows, properties, payload, sheet, get released() {return released;}, get flushed() {return flushed;}, failFlush(value) {failFlush = value;}};
+  return {context, notes, mails, triggers, mailFails(value) {mailFails = value;}, rows, properties, payload, sheet, get released() {return released;}, get flushed() {return flushed;}, failFlush(value) {failFlush = value;}};
 }
 
 test('setup creates headers and binds the table, repeatedly without deleting rows', () => {
@@ -132,4 +134,18 @@ test('quota exhaustion queues notification without losing the record', () => {
  assert.equal(f.context.submitRequest(f.payload).saved,true); assert.equal(f.mails.length,0);
  assert.equal(f.rows[1][8],'Čeká'); f.context.MailApp.getRemainingDailyQuota=()=>1;
  f.context.retryNotifications(); assert.equal(f.mails.length,1);
+});
+
+test('mail failure exposes diagnostic note to table owner', () => {
+ const f=fixture(); f.context.setup(); f.mailFails(true); f.context.submitRequest(f.payload);
+ assert.match(f.notes['2:9'],/mail failure/); assert.equal(f.rows[1][8],'Čeká');
+});
+test('manual diagnostic test sends a mail without creating a request', () => {
+ const f=fixture(); f.context.testNotification(); assert.equal(f.mails.length,1);
+ assert.equal(f.mails[0].to,'kami.valek@gmail.com'); assert.equal(f.rows.length,0);
+});
+test('manual test reveals sending failures and prevents non-owner access', () => {
+ const f=fixture(); f.mailFails(true); assert.throws(()=>f.context.testNotification(), /mail failure/);
+ f.context.Session.getActiveUser=()=>({getEmail:()=> 'employee@example.cz'});
+ assert.throws(()=>f.context.testNotification(), /vlastník/);
 });

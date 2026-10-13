@@ -151,3 +151,28 @@ Původní `smtp.local.json` a `data/requests.sqlite3` nová verze nepoužívá a
 Existující žádosti se do Googlu automaticky nepřenesou. Novou verzi rozbalte do nové
 složky, původní databázi zachovejte jako zálohu. SMTP heslo není pro tuto verzi potřeba.
 Tabulku s důvody odchodů sdílejte pouze s oprávněnými správci.
+
+
+## Diagnostika nedoručené notifikace
+
+1. U nové žádosti zkontrolujte sloupec **Notifikace**:
+   - **Odesláno: čas**: Google zprávu přijal. V příjemcově Gmailu vyhledejte
+     `in:anywhere subject:propustku` a zkontrolujte spam i adresu příjemce.
+     Cílová adresa je **kami.valek@gmail.com** (bez písmene l za kami).
+   - **Čeká**: najeďte myší na buňku. Poznámka nyní obsahuje poslední chybu nebo
+     informaci o vyčerpané kvótě. Příčinu také najdete v Apps Scriptu v **Spuštění**.
+   - Prázdno u nové žádosti: ověřte, že používáte aktualizované nasazení.
+2. Pro izolovaný test otevřete editor projektu pod účtem vlastníka,
+   vyberte funkci **testNotification** a klikněte na **Spustit**.
+   Tato funkce odešle jeden skutečný testovací e-mail bez nové žádosti.
+   Chybu úmyslně nezachytává, aby se v editoru zobrazil konkrétní problém.
+3. Pokud Google žádá nová oprávnění, povolte odesílání pošty. Jestliže je firemní
+   politika blokuje, kontaktujte správce Google Workspace.
+4. Pokud test z editoru funguje, ale formulář ne, znovu spusťte **setup** a aktualizujte
+   nasazení: **Nasadit → Spravovat nasazení → tužka → Nová verze → Nasadit**.
+   Nasazení musí běžet jako **Já** (vlastník s uděleným oprávněním MailApp).
+5. Funkci **retryNotifications** můžete spustit ručně; zkusí odeslat pouze čekající
+   oznámení. Úspěšně označené ani staré prázdné záznamy znovu neodesílá.
+
+Změny na GitHubu se do vašeho Google projektu nepřenášejí automaticky. Pro tuto
+aktualizaci stačí nahradit obsah **Code.gs**, uložit, autorizovat a nasadit novou verzi.

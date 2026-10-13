@@ -126,7 +126,10 @@ function notifyRow_(sheet, rowNumber, spreadsheetId) {
   const row = sheet.getRange(rowNumber, 1, 1, HEADERS.length).getValues()[0];
   if (row[8] !== 'Čeká') return;
   try {
-    if (MailApp.getRemainingDailyQuota() < 1) return;
+    if (MailApp.getRemainingDailyQuota() < 1) {
+      sheet.getRange(rowNumber, 9, 1, 1).setNote('Vyčerpaná denní kvóta pro odesílání e-mailů. Po její obnově se odeslání automaticky zopakuje.');
+      return;
+    }
     const url = 'https://docs.google.com/spreadsheets/d/' + spreadsheetId + '/edit';
     MailApp.sendEmail({
       to: NOTIFICATION_EMAIL,
@@ -137,9 +140,12 @@ function notifyRow_(sheet, rowNumber, spreadsheetId) {
       name: 'Evidence propustek'
     });
     sheet.getRange(rowNumber, 9, 1, 1).setValues([['Odesláno: ' + Utilities.formatDate(new Date(), 'Europe/Prague', 'yyyy-MM-dd HH:mm:ss')]]);
+    sheet.getRange(rowNumber, 9, 1, 1).setNote('Google přijal zprávu pro ' + NOTIFICATION_EMAIL + '. Toto není potvrzení doručení do schránky.');
     SpreadsheetApp.flush();
   } catch (error) {
-    console.warn('Notifikace čeká na opakování. Zkontrolujte autorizaci a kvótu MailApp.');
+    const message = String(error && error.message || error).slice(0, 1500);
+    console.warn('Chyba notifikace: ' + message);
+    try { sheet.getRange(rowNumber, 9, 1, 1).setNote('Poslední chyba při odesílání: ' + message); } catch (noteError) { /* Zápis žádosti zůstává platný. */ }
   }
 }
 
@@ -157,4 +163,24 @@ function retryNotifications() {
       if (states[index][0] === 'Čeká') notifyRow_(sheet, index + 2, id);
     }
   } finally { lock.releaseLock(); }
+}
+
+
+/** Spusťte ručně z editoru pod účtem vlastníka pro diagnostiku pošty. */
+function testNotification() {
+  const activeEmail = Session.getActiveUser().getEmail();
+  const ownerEmail = Session.getEffectiveUser().getEmail();
+  if (!activeEmail || activeEmail !== ownerEmail) {
+    throw new Error('Test může spustit pouze vlastník pod svým účtem v editoru Apps Scriptu.');
+  }
+  const quota = MailApp.getRemainingDailyQuota();
+  if (quota < 1) throw new Error('Vyčerpaná denní kvóta MailApp. Zkuste test po její obnově.');
+  // Záměrně bez catch: editor ukáže skutečnou chybu oprávnění nebo Google služby.
+  MailApp.sendEmail({
+    to: NOTIFICATION_EMAIL,
+    subject: 'Test notifikace — Evidence propustek',
+    body: 'Toto je test odesílání notifikací z Evidence propustek. Pokud zpráva dorazila, odesílání z editoru funguje. Ještě ověřte nové podání přes nasazený formulář.',
+    name: 'Evidence propustek'
+  });
+  console.log('Google přijal testovací zprávu pro ' + NOTIFICATION_EMAIL + '. Zkontrolujte příchozí poštu, spam a Všechny zprávy.');
 }
